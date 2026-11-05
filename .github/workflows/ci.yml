@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4              # récupère le code du dépôt
       - uses: pnpm/action-setup@v4             # installe pnpm (version lue dans package.json)
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm                          # cache des dépendances : CI plus rapide
