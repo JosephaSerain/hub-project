@@ -1,0 +1,14 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"          # fonctionne aussi pour pnpm
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      dependances:                    # regroupe les mises à jour mineures et correctifs en une seule PR
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "github-actions"   # met aussi à jour les actions de ta CI (checkout, setup-node…)
+    directory: "/"
+    schedule:
+      interval: "weekly"
