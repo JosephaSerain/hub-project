@@ -1,17 +1,22 @@
-// import * as cdk from 'aws-cdk-lib/core';
-// import { Template } from 'aws-cdk-lib/assertions';
-// import * as Api from '../lib/api-stack';
+import * as cdk from 'aws-cdk-lib/core';
+import { Template } from 'aws-cdk-lib/assertions';
+import { ApiStack } from '../lib/api-stack';
 
-// example test. To run these tests, uncomment this file along with the
-// example resource in lib/api-stack.ts
-test('SQS Queue Created', () => {
-//   const app = new cdk.App();
-//     // WHEN
-//   const stack = new Api.ApiStack(app, 'MyTestStack');
-//     // THEN
-//   const template = Template.fromStack(stack);
+describe('ApiStack', () => {
+    const app = new cdk.App();
+    const stack = new ApiStack(app, 'TestStack');
+    const template = Template.fromStack(stack);   // synthétise la stack en mémoire
 
-//   template.hasResourceProperties('AWS::SQS::Queue', {
-//     VisibilityTimeout: 300
-//   });
+    it('crée une table DynamoDB facturée à la requête', () => {
+        template.hasResourceProperties('AWS::DynamoDB::Table', {
+            BillingMode: 'PAY_PER_REQUEST',
+        });
+    });
+
+    it('crée les 4 Lambdas, toutes en Node 24', () => {
+        template.resourceCountIs('AWS::Lambda::Function', 4);
+        template.allResourcesProperties('AWS::Lambda::Function', {
+            Runtime: 'nodejs24.x',
+        });
+    });
 });
