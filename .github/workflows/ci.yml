@@ -9,7 +9,7 @@ jobs:
   qualite:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4              # récupère le code du dépôt
+      - uses: actions/checkout@v7              # récupère le code du dépôt
       - uses: pnpm/action-setup@v4             # installe pnpm (version lue dans package.json)
       - uses: actions/setup-node@v4
         with:
