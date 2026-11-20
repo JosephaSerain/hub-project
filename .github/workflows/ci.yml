@@ -18,4 +18,5 @@ jobs:
       - run: pnpm install --frozen-lockfile    # installation stricte depuis le lockfile
       - run: pnpm lint
       - run: pnpm check-types
+      - run: pnpm test
       - run: pnpm build
