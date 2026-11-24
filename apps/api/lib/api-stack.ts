@@ -25,35 +25,39 @@ export class ApiStack extends cdk.Stack {
       integration: new HttpLambdaIntegration('HelloIntegration', helloFn),
     });
 
-    // La "mémoire" : la table DynamoDB
-    const table = new Table(this, 'ServicesTable', {
-      partitionKey: { name: 'id', type: AttributeType.STRING },
-      billingMode: BillingMode.PAY_PER_REQUEST,      // on paie à la requête (on-demand)
-      removalPolicy: cdk.RemovalPolicy.DESTROY,      // supprimée avec cdk destroy (projet d'apprentissage)
+    // La table unique, avec PK / SK et deux index
+    const table = new Table(this, 'DevHubTable', {
+      partitionKey: { name: 'PK', type: AttributeType.STRING },
+      sortKey: { name: 'SK', type: AttributeType.STRING },
+      billingMode: BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+    table.addGlobalSecondaryIndex({
+      indexName: 'GSI1',
+      partitionKey: { name: 'GSI1PK', type: AttributeType.STRING },
+      sortKey: { name: 'GSI1SK', type: AttributeType.STRING },
+    });
+    table.addGlobalSecondaryIndex({
+      indexName: 'GSI2',
+      partitionKey: { name: 'GSI2PK', type: AttributeType.STRING },
+      sortKey: { name: 'GSI2SK', type: AttributeType.STRING },
     });
 
     const environment = { TABLE_NAME: table.tableName };
+    const lambda = (id: string, fichier: string) =>
+      new NodejsFunction(this, id, {
+        entry: path.join(__dirname, `../src/handlers/${fichier}`),
+        runtime: Runtime.NODEJS_24_X,
+        environment,
+      });
 
-    const createFn = new NodejsFunction(this, 'CreateServiceFunction', {
-      entry: path.join(__dirname, '../src/handlers/services/create.ts'),
-      runtime: Runtime.NODEJS_24_X,
-      environment,
-    });
-    const listFn = new NodejsFunction(this, 'ListServicesFunction', {
-      entry: path.join(__dirname, '../src/handlers/services/list.ts'),
-      runtime: Runtime.NODEJS_24_X,
-      environment,
-    });
-    const getFn = new NodejsFunction(this, 'GetServiceFunction', {
-      entry: path.join(__dirname, '../src/handlers/services/get.ts'),
-      runtime: Runtime.NODEJS_24_X,
-      environment,
-    });
+    const createFn = lambda('CreateServiceFunction', 'services/create.ts');
+    const getFn = lambda('GetServiceFunction', 'services/get.ts');
+    const listTeamServicesFn = lambda('ListTeamServicesFunction', 'teams/list-services.ts');
 
-    // Le moindre privilège : chaque Lambda n'a QUE les droits dont elle a besoin
     table.grantWriteData(createFn);
-    table.grantReadData(listFn);
     table.grantReadData(getFn);
+    table.grantReadData(listTeamServicesFn);   // couvre aussi les index (GSI)
 
     api.addRoutes({
       path: '/services',
@@ -61,14 +65,14 @@ export class ApiStack extends cdk.Stack {
       integration: new HttpLambdaIntegration('CreateServiceIntegration', createFn),
     });
     api.addRoutes({
-      path: '/services',
-      methods: [HttpMethod.GET],
-      integration: new HttpLambdaIntegration('ListServicesIntegration', listFn),
-    });
-    api.addRoutes({
       path: '/services/{id}',
       methods: [HttpMethod.GET],
       integration: new HttpLambdaIntegration('GetServiceIntegration', getFn),
+    });
+    api.addRoutes({
+      path: '/teams/{equipe}/services',
+      methods: [HttpMethod.GET],
+      integration: new HttpLambdaIntegration('ListTeamServicesIntegration', listTeamServicesFn),
     });
 
     new cdk.CfnOutput(this, 'ApiUrl', { value: api.apiEndpoint });

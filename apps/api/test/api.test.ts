@@ -1,6 +1,7 @@
 import * as cdk from 'aws-cdk-lib/core';
-import { Template } from 'aws-cdk-lib/assertions';
 import { ApiStack } from '../lib/api-stack';
+import { Match, Template } from 'aws-cdk-lib/assertions';
+
 
 describe('ApiStack', () => {
     const app = new cdk.App();
@@ -19,4 +20,17 @@ describe('ApiStack', () => {
             Runtime: 'nodejs24.x',
         });
     });
+    it('crée la table avec les index GSI1 et GSI2', () => {
+        template.hasResourceProperties('AWS::DynamoDB::Table', {
+            KeySchema: [
+                { AttributeName: 'PK', KeyType: 'HASH' },
+                { AttributeName: 'SK', KeyType: 'RANGE' },
+            ],
+            GlobalSecondaryIndexes: [
+                Match.objectLike({ IndexName: 'GSI1' }),
+                Match.objectLike({ IndexName: 'GSI2' }),
+            ],
+        });
+    });
 });
+
