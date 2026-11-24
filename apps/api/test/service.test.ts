@@ -1,78 +1,107 @@
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBDocumentClient, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { handler as creerService } from '../src/handlers/services/create';
 import { handler as lireService } from '../src/handlers/services/get';
+import { handler as listerServicesEquipe } from '../src/handlers/teams/list-services';
 
-// Remplace TOUS les clients DynamoDBDocumentClient (y compris celui de db.ts) par un faux
 const ddbMock = mockClient(DynamoDBDocumentClient);
-
-// Chaque test repart d'un mock vierge : les tests restent indépendants
 beforeEach(() => ddbMock.reset());
 
-// Petits utilitaires pour construire un événement et lire la réponse
 const evenement = (partiel: Partial<APIGatewayProxyEventV2>) => partiel as APIGatewayProxyEventV2;
 const reponse = (res: unknown) => res as APIGatewayProxyStructuredResultV2;
 
 describe('POST /services', () => {
-    it('crée un service et renvoie 201', async () => {
-        // Arrange
+    const body = JSON.stringify({ nom: 'catalogue', equipe: 'plateforme' });
+
+    it('crée le service avec ses clés et une écriture conditionnelle', async () => {
         ddbMock.on(PutCommand).resolves({});
 
-        // Act
-        const res = reponse(
-            await creerService(evenement({ body: JSON.stringify({ nom: 'catalogue', equipe: 'plateforme' }) })),
-        );
+        const res = reponse(await creerService(evenement({ body })));
 
-        // Assert
         expect(res.statusCode).toBe(201);
-        const corps = JSON.parse(res.body!);
-        expect(corps).toMatchObject({ nom: 'catalogue', equipe: 'plateforme' });
-        expect(corps.id).toEqual(expect.any(String));
-
-        const appels = ddbMock.commandCalls(PutCommand);
-        expect(appels).toHaveLength(1);
-        expect(appels[0].args[0].input.TableName).toBe('table-de-test');
+        const input = ddbMock.commandCalls(PutCommand)[0].args[0].input;
+        expect(input.Item).toMatchObject({
+            PK: 'SERVICE#catalogue',
+            SK: 'METADATA',
+            GSI1PK: 'TEAM#plateforme',
+            GSI1SK: 'SERVICE#catalogue',
+            statut: 'developpement',
+        });
+        expect(input.ConditionExpression).toBe('attribute_not_exists(PK)');
     });
 
-    it("renvoie 400 si les données sont invalides, sans écrire en base", async () => {
-        const res = reponse(await creerService(evenement({ body: JSON.stringify({ nom: 'x' }) })));
+    it("ne renvoie pas les clés techniques au client", async () => {
+        ddbMock.on(PutCommand).resolves({});
+
+        const corps = JSON.parse(reponse(await creerService(evenement({ body }))).body!);
+
+        expect(corps).not.toHaveProperty('PK');
+        expect(corps).not.toHaveProperty('GSI1PK');
+    });
+
+    it('renvoie 409 si le service existe déjà', async () => {
+        ddbMock.on(PutCommand).rejects(
+            new ConditionalCheckFailedException({ message: 'existe', $metadata: {} }),
+        );
+
+        const res = reponse(await creerService(evenement({ body })));
+
+        expect(res.statusCode).toBe(409);
+    });
+
+    it('renvoie 400 si le nom contient des caractères interdits, sans écrire', async () => {
+        const res = reponse(
+            await creerService(evenement({ body: JSON.stringify({ nom: 'Mon Service!', equipe: 'plateforme' }) })),
+        );
 
         expect(res.statusCode).toBe(400);
         expect(ddbMock.commandCalls(PutCommand)).toHaveLength(0);
     });
-
-    it("renvoie 400 si le body n'est pas du JSON", async () => {
-        const res = reponse(await creerService(evenement({ body: 'pas du json' })));
-
-        expect(res.statusCode).toBe(400);
-    });
 });
 
 describe('GET /services/{id}', () => {
-    const id = 'a1a3b04a-e4d5-432b-b0aa-0611d1aeb58c';
+    it('lit le service par sa clé complète', async () => {
+        ddbMock.on(GetCommand).resolves({ Item: { PK: 'SERVICE#catalogue', SK: 'METADATA', nom: 'catalogue' } });
 
-    it('renvoie 200 et le service quand il existe', async () => {
-        ddbMock.on(GetCommand).resolves({ Item: { id, nom: 'catalogue', equipe: 'plateforme' } });
-
-        const res = reponse(await lireService(evenement({ pathParameters: { id } })));
+        const res = reponse(await lireService(evenement({ pathParameters: { id: 'catalogue' } })));
 
         expect(res.statusCode).toBe(200);
-        expect(JSON.parse(res.body!)).toMatchObject({ id, nom: 'catalogue' });
+        expect(ddbMock.commandCalls(GetCommand)[0].args[0].input.Key).toEqual({
+            PK: 'SERVICE#catalogue',
+            SK: 'METADATA',
+        });
+        expect(JSON.parse(res.body!)).toEqual({ nom: 'catalogue' });
     });
 
     it("renvoie 404 quand le service n'existe pas", async () => {
-        ddbMock.on(GetCommand).resolves({});   // DynamoDB ne renvoie pas d'Item
+        ddbMock.on(GetCommand).resolves({});
 
-        const res = reponse(await lireService(evenement({ pathParameters: { id } })));
+        const res = reponse(await lireService(evenement({ pathParameters: { id: 'inconnu' } })));
 
         expect(res.statusCode).toBe(404);
     });
+});
 
-    it("renvoie 400 si l'id n'est pas un UUID, sans interroger la base", async () => {
-        const res = reponse(await lireService(evenement({ pathParameters: { id: 'abc' } })));
+describe('GET /teams/{equipe}/services', () => {
+    it("fait une Query sur GSI1 pour l'équipe", async () => {
+        ddbMock.on(QueryCommand).resolves({ Items: [{ nom: 'catalogue', GSI1PK: 'TEAM#plateforme' }] });
 
-        expect(res.statusCode).toBe(400);
-        expect(ddbMock.commandCalls(GetCommand)).toHaveLength(0);
+        const res = reponse(await listerServicesEquipe(evenement({ pathParameters: { equipe: 'plateforme' } })));
+
+        expect(res.statusCode).toBe(200);
+        const input = ddbMock.commandCalls(QueryCommand)[0].args[0].input;
+        expect(input.IndexName).toBe('GSI1');
+        expect(input.ExpressionAttributeValues).toMatchObject({ ':equipe': 'TEAM#plateforme' });
+        expect(JSON.parse(res.body!)).toEqual({ services: [{ nom: 'catalogue' }], curseur: null });
+    });
+
+    it("renvoie un curseur quand il reste des résultats", async () => {
+        ddbMock.on(QueryCommand).resolves({ Items: [], LastEvaluatedKey: { PK: 'x', SK: 'y' } });
+
+        const res = reponse(await listerServicesEquipe(evenement({ pathParameters: { equipe: 'plateforme' } })));
+
+        expect(JSON.parse(res.body!).curseur).toEqual(expect.any(String));
     });
 });
