@@ -17,6 +17,10 @@ export const cles = {
         GSI2PK: `STATUS#${statut}`,
         GSI2SK: `${date}#SERVICE#${id}`,
     }),
+    historiqueStatut: (serviceId: string, revision: number) => ({
+        PK: `SERVICE#${serviceId}`,
+        SK: `HISTO#${String(revision).padStart(6, '0')}`,
+    }),
 };
 
 // Retire les attributs techniques avant de renvoyer un élément au client
