@@ -5,6 +5,10 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from '
 import { handler as creerService } from '../src/handlers/services/create';
 import { handler as lireService } from '../src/handlers/services/get';
 import { handler as listerServicesEquipe } from '../src/handlers/teams/list-services';
+import { TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
+import { TransactionCanceledException } from '@aws-sdk/client-dynamodb';
+import { handler as creerDeploiement } from '../src/handlers/deployments/create';
+import { handler as listerDeploiements } from '../src/handlers/deployments/list';
 
 const ddbMock = mockClient(DynamoDBDocumentClient);
 beforeEach(() => ddbMock.reset());
@@ -103,5 +107,70 @@ describe('GET /teams/{equipe}/services', () => {
         const res = reponse(await listerServicesEquipe(evenement({ pathParameters: { equipe: 'plateforme' } })));
 
         expect(JSON.parse(res.body!).curseur).toEqual(expect.any(String));
+    });
+});
+
+describe('POST /services/{id}/deployments', () => {
+    const body = JSON.stringify({ version: '1.2.0', deployePar: 'josepha' });
+
+    it("écrit le déploiement et met à jour le service dans une même transaction", async () => {
+        ddbMock.on(TransactWriteCommand).resolves({});
+
+        const res = reponse(await creerDeploiement(evenement({ pathParameters: { id: 'catalogue' }, body })));
+
+        expect(res.statusCode).toBe(201);
+        const [ajout, miseAJour] = ddbMock.commandCalls(TransactWriteCommand)[0].args[0].input.TransactItems!;
+        expect(ajout.Put!.Item).toMatchObject({ PK: 'SERVICE#catalogue', version: '1.2.0' });
+        expect(ajout.Put!.Item!.SK).toMatch(/^DEPLOY#/);
+        expect(miseAJour.Update!.Key).toEqual({ PK: 'SERVICE#catalogue', SK: 'METADATA' });
+        expect(miseAJour.Update!.ConditionExpression).toBe('attribute_exists(PK)');
+    });
+
+    it("renvoie 404 quand la transaction est annulée parce que le service n'existe pas", async () => {
+        ddbMock.on(TransactWriteCommand).rejects(
+            new TransactionCanceledException({
+                message: 'annulée',
+                $metadata: {},
+                CancellationReasons: [{ Code: 'None' }, { Code: 'ConditionalCheckFailed' }],
+            }),
+        );
+
+        const res = reponse(await creerDeploiement(evenement({ pathParameters: { id: 'fantome' }, body })));
+
+        expect(res.statusCode).toBe(404);
+    });
+
+    it("renvoie 400 si la version n'est pas au format SemVer, sans écrire", async () => {
+        const res = reponse(
+            await creerDeploiement(
+                evenement({ pathParameters: { id: 'catalogue' }, body: JSON.stringify({ version: 'v2', deployePar: 'josepha' }) }),
+            ),
+        );
+
+        expect(res.statusCode).toBe(400);
+        expect(ddbMock.commandCalls(TransactWriteCommand)).toHaveLength(0);
+    });
+});
+
+describe('GET /services/{id}/deployments', () => {
+    it('lit les déploiements du plus récent au plus ancien, 10 par défaut', async () => {
+        ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+        await listerDeploiements(evenement({ pathParameters: { id: 'catalogue' } }));
+
+        const input = ddbMock.commandCalls(QueryCommand)[0].args[0].input;
+        expect(input.ScanIndexForward).toBe(false);
+        expect(input.Limit).toBe(10);
+        expect(input.ExpressionAttributeValues).toMatchObject({ ':prefixe': 'DEPLOY#' });
+    });
+
+    it('refuse une limite trop grande', async () => {
+        const res = reponse(
+            await listerDeploiements(
+                evenement({ pathParameters: { id: 'catalogue' }, queryStringParameters: { limite: '1000' } }),
+            ),
+        );
+
+        expect(res.statusCode).toBe(400);
     });
 });

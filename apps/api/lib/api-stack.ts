@@ -76,5 +76,22 @@ export class ApiStack extends cdk.Stack {
     });
 
     new cdk.CfnOutput(this, 'ApiUrl', { value: api.apiEndpoint });
+
+    const createDeploymentFn = lambda('CreateDeploymentFunction', 'deployments/create.ts');
+    const listDeploymentsFn = lambda('ListDeploymentsFunction', 'deployments/list.ts');
+
+    table.grantWriteData(createDeploymentFn);
+    table.grantReadData(listDeploymentsFn);
+
+    api.addRoutes({
+      path: '/services/{id}/deployments',
+      methods: [HttpMethod.POST],
+      integration: new HttpLambdaIntegration('CreateDeploymentIntegration', createDeploymentFn),
+    });
+    api.addRoutes({
+      path: '/services/{id}/deployments',
+      methods: [HttpMethod.GET],
+      integration: new HttpLambdaIntegration('ListDeploymentsIntegration', listDeploymentsFn),
+    });
   }
 }

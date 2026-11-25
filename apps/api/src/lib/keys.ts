@@ -3,6 +3,10 @@
 
 export const cles = {
     service: (id: string) => ({ PK: `SERVICE#${id}`, SK: 'METADATA' }),
+    deploiement: (serviceId: string, date: string, deploiementId: string) => ({
+        PK: `SERVICE#${serviceId}`,
+        SK: `DEPLOY#${date}#${deploiementId}`,
+    }),
 
     serviceParEquipe: (equipe: string, id: string) => ({
         GSI1PK: `TEAM#${equipe}`,
