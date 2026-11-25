@@ -1,11 +1,12 @@
 import * as path from 'node:path';
 import * as cdk from 'aws-cdk-lib/core';
 import { Construct } from 'constructs';
-import { Runtime } from 'aws-cdk-lib/aws-lambda';
+import { FilterCriteria, FilterRule, Runtime, StartingPosition } from 'aws-cdk-lib/aws-lambda';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { HttpApi, HttpMethod } from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
-import { AttributeType, BillingMode, Table } from 'aws-cdk-lib/aws-dynamodb';
+import { AttributeType, BillingMode, StreamViewType, Table } from 'aws-cdk-lib/aws-dynamodb';
+import { DynamoEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 
 export class ApiStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -30,6 +31,8 @@ export class ApiStack extends cdk.Stack {
       partitionKey: { name: 'PK', type: AttributeType.STRING },
       sortKey: { name: 'SK', type: AttributeType.STRING },
       billingMode: BillingMode.PAY_PER_REQUEST,
+      stream: StreamViewType.NEW_AND_OLD_IMAGES,
+      timeToLiveAttribute: 'expireLe',
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
     table.addGlobalSecondaryIndex({
@@ -110,5 +113,25 @@ export class ApiStack extends cdk.Stack {
       methods: [HttpMethod.GET],
       integration: new HttpLambdaIntegration('ListStatusServicesIntegration', listStatusServicesFn),
     });
+
+    const historiserStatut = lambda('HistoriserStatutFunction', 'streams/historiser-statut.ts');
+    // Moindre privilège : uniquement PutItem (la lecture du stream est accordée par DynamoEventSource)
+    table.grant(historiserStatut, 'dynamodb:PutItem');
+
+    historiserStatut.addEventSource(
+      new DynamoEventSource(table, {
+        startingPosition: StartingPosition.LATEST,
+        batchSize: 10,
+        retryAttempts: 3,
+        bisectBatchOnError: true,
+        reportBatchItemFailures: true,
+        filters: [
+          FilterCriteria.filter({
+            eventName: FilterRule.isEqual('MODIFY'),
+            dynamodb: { NewImage: { type: { S: FilterRule.isEqual('SERVICE') } } },
+          }),
+        ],
+      }),
+    );
   }
 }

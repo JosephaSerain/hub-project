@@ -15,7 +15,7 @@ describe('ApiStack', () => {
     });
 
     it('crée les 4 Lambdas, toutes en Node 24', () => {
-        template.resourceCountIs('AWS::Lambda::Function', 8);
+        template.resourceCountIs('AWS::Lambda::Function', 9);
         template.allResourcesProperties('AWS::Lambda::Function', {
             Runtime: 'nodejs24.x',
         });
@@ -30,6 +30,17 @@ describe('ApiStack', () => {
                 Match.objectLike({ IndexName: 'GSI1' }),
                 Match.objectLike({ IndexName: 'GSI2' }),
             ],
+        });
+    });
+    test('La table publie un stream et expire les éléments via expireLe', () => {
+        template.hasResourceProperties('AWS::DynamoDB::Table', {
+            StreamSpecification: { StreamViewType: 'NEW_AND_OLD_IMAGES' },
+            TimeToLiveSpecification: { AttributeName: 'expireLe', Enabled: true },
+        });
+        template.hasResourceProperties('AWS::Lambda::EventSourceMapping', {
+            StartingPosition: 'LATEST',
+            FunctionResponseTypes: ['ReportBatchItemFailures'],
+            FilterCriteria: Match.anyValue(),
         });
     });
 });
