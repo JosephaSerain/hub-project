@@ -93,5 +93,22 @@ export class ApiStack extends cdk.Stack {
       methods: [HttpMethod.GET],
       integration: new HttpLambdaIntegration('ListDeploymentsIntegration', listDeploymentsFn),
     });
+
+    const updateStatusFn = lambda('UpdateServiceStatusFunction', 'services/update-status.ts');
+    const listStatusServicesFn = lambda('ListStatusServicesFunction', 'statuses/list-services.ts');
+
+    table.grantWriteData(updateStatusFn);
+    table.grantReadData(listStatusServicesFn);
+
+    api.addRoutes({
+      path: '/services/{id}/statut',
+      methods: [HttpMethod.PATCH],
+      integration: new HttpLambdaIntegration('UpdateServiceStatusIntegration', updateStatusFn),
+    });
+    api.addRoutes({
+      path: '/statuts/{statut}/services',
+      methods: [HttpMethod.GET],
+      integration: new HttpLambdaIntegration('ListStatusServicesIntegration', listStatusServicesFn),
+    });
   }
 }

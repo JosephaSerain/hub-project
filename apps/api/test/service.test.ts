@@ -9,6 +9,10 @@ import { TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import { TransactionCanceledException } from '@aws-sdk/client-dynamodb';
 import { handler as creerDeploiement } from '../src/handlers/deployments/create';
 import { handler as listerDeploiements } from '../src/handlers/deployments/list';
+import { UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { marshall } from '@aws-sdk/util-dynamodb';
+import { handler as changerStatut } from '../src/handlers/services/update-status';
+import { handler as listerParStatut } from '../src/handlers/statuses/list-services';
 
 const ddbMock = mockClient(DynamoDBDocumentClient);
 beforeEach(() => ddbMock.reset());
@@ -170,6 +174,80 @@ describe('GET /services/{id}/deployments', () => {
                 evenement({ pathParameters: { id: 'catalogue' }, queryStringParameters: { limite: '1000' } }),
             ),
         );
+
+        expect(res.statusCode).toBe(400);
+    });
+});
+
+describe('PATCH /services/{id}/statut', () => {
+    const changement = (revision: number) =>
+        evenement({ pathParameters: { id: 'panier' }, body: JSON.stringify({ statut: 'deprecie', revision }) });
+
+    it('met à jour le statut, les clés de GSI2 et vérifie la révision', async () => {
+        ddbMock.on(UpdateCommand).resolves({ Attributes: { nom: 'panier', statut: 'deprecie', revision: 2 } });
+
+        const res = reponse(await changerStatut(changement(1)));
+
+        expect(res.statusCode).toBe(200);
+        const input = ddbMock.commandCalls(UpdateCommand)[0].args[0].input;
+        expect(input.ConditionExpression).toBe('revision = :revisionLue');
+        expect(input.ExpressionAttributeValues).toMatchObject({
+            ':revisionLue': 1,
+            ':gsi2pk': 'STATUS#deprecie',
+        });
+    });
+
+    it('renvoie 409 et la révision actuelle si le service a été modifié entre-temps', async () => {
+        ddbMock.on(UpdateCommand).rejects(
+            new ConditionalCheckFailedException({
+                message: 'conflit',
+                $metadata: {},
+                Item: marshall({ PK: 'SERVICE#panier', revision: 2 }),
+            }),
+        );
+
+        const res = reponse(await changerStatut(changement(1)));
+
+        expect(res.statusCode).toBe(409);
+        expect(JSON.parse(res.body!).revisionActuelle).toBe(2);
+    });
+
+    it("renvoie 404 si le service n'existe pas", async () => {
+        ddbMock.on(UpdateCommand).rejects(
+            new ConditionalCheckFailedException({ message: 'absent', $metadata: {} }),
+        );
+
+        const res = reponse(await changerStatut(changement(1)));
+
+        expect(res.statusCode).toBe(404);
+    });
+
+    it('renvoie 400 si la révision est absente, sans écrire', async () => {
+        const res = reponse(
+            await changerStatut(
+                evenement({ pathParameters: { id: 'panier' }, body: JSON.stringify({ statut: 'deprecie' }) }),
+            ),
+        );
+
+        expect(res.statusCode).toBe(400);
+        expect(ddbMock.commandCalls(UpdateCommand)).toHaveLength(0);
+    });
+});
+
+describe('GET /statuts/{statut}/services', () => {
+    it('fait une Query sur GSI2, les plus récents d\'abord', async () => {
+        ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+        await listerParStatut(evenement({ pathParameters: { statut: 'deprecie' } }));
+
+        const input = ddbMock.commandCalls(QueryCommand)[0].args[0].input;
+        expect(input.IndexName).toBe('GSI2');
+        expect(input.ExpressionAttributeValues).toEqual({ ':statut': 'STATUS#deprecie' });
+        expect(input.ScanIndexForward).toBe(false);
+    });
+
+    it('refuse un statut inconnu', async () => {
+        const res = reponse(await listerParStatut(evenement({ pathParameters: { statut: 'archive' } })));
 
         expect(res.statusCode).toBe(400);
     });

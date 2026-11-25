@@ -43,6 +43,7 @@ export const handler = async (event: APIGatewayProxyEventV2) => {
         description,
         statut,
         creeLe,
+        revision: 1
     };
 
     try {
