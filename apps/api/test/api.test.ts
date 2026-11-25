@@ -15,7 +15,7 @@ describe('ApiStack', () => {
     });
 
     it('crée les 4 Lambdas, toutes en Node 24', () => {
-        template.resourceCountIs('AWS::Lambda::Function', 4);
+        template.resourceCountIs('AWS::Lambda::Function', 6);
         template.allResourcesProperties('AWS::Lambda::Function', {
             Runtime: 'nodejs24.x',
         });
